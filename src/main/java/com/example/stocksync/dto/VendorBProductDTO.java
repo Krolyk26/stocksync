@@ -4,7 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 
-public record VendorAProductDTO(
+public record VendorBProductDTO(
         @NotBlank(message = "SKU cannot be blank")
         String sku,
         @NotBlank(message = "Product name cannot be blank")

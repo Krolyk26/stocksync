@@ -1,5 +1,8 @@
 package com.example.stocksync.service;
+
+import com.example.stocksync.dto.ProductDTO;
 import com.example.stocksync.dto.VendorAProductDTO;
+import com.example.stocksync.dto.VendorBProductDTO;
 import com.example.stocksync.entity.Product;
 import com.example.stocksync.entity.StockEvent;
 import com.example.stocksync.repository.ProductRepository;
@@ -11,11 +14,9 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 @Service
 public class StockSyncService {
-
     private static final Logger log = LoggerFactory.getLogger(StockSyncService.class);
 
     private final ProductRepository productRepository;
@@ -33,52 +34,50 @@ public class StockSyncService {
         this.vendorBClient = vendorBClient;
     }
 
-    @Scheduled(fixedRate = 60000)
+    @Scheduled(fixedRateString = "${sync.interval.ms}")
     public void syncStock() {
         log.info("Starting stock sync...");
 
         List<VendorAProductDTO> vendorAProducts = vendorAClient.fetchProducts();
         for (VendorAProductDTO dto : vendorAProducts) {
-            upsertProduct(dto.sku(), dto.name(), dto.stockQuantity(), "VendorA");
+            ProductDTO productDTO = new ProductDTO(dto.sku(), dto.name(), dto.stockQuantity(), dto.vendor());
+            upsertProduct(productDTO);
         }
 
-        List<Product> vendorBProducts = vendorBClient.fetchProducts();
-        for (Product p : vendorBProducts) {
-            upsertProduct(p.getSku(), p.getName(), p.getStockQuantity(), p.getVendor());
+        List<VendorBProductDTO> vendorBProducts = vendorBClient.fetchProducts();
+        for (VendorBProductDTO dto : vendorBProducts) {
+            ProductDTO productDTO = new ProductDTO(dto.sku(), dto.name(), dto.stockQuantity(), dto.vendor());
+            upsertProduct(productDTO);
         }
 
         log.info("Stock sync completed.");
     }
 
-    private void upsertProduct(String sku, String name, Integer stockQuantity, String vendor) {
-        Optional<Product> optionalProduct = productRepository.findBySkuAndVendor(sku, vendor);
 
-        if (optionalProduct.isPresent()) {
-            Product existing = optionalProduct.get();
+    public void upsertProduct(ProductDTO productDTO) {
+        Product product = productRepository.findBySkuAndVendor(productDTO.sku(), productDTO.vendor())
+                .orElse(new Product(
+                        productDTO.sku(),
+                        productDTO.name(),
+                        productDTO.stockQuantity(),
+                        productDTO.vendor()
+                ));
 
-            if (existing.getStockQuantity() > 0 && stockQuantity == 0) {
-                log.warn("Product {} ({}) is now OUT OF STOCK!", sku, vendor);
-                StockEvent event = new StockEvent(sku, vendor, LocalDateTime.now());
-                stockEventRepository.save(event);
-            }
+        boolean isNewProduct = product.getId() == null;
+        Integer oldStockQuantity = product.getStockQuantity();
 
-            existing.setName(name);
-            existing.setStockQuantity(stockQuantity);
-            productRepository.save(existing);
-
-        } else {
-            Product newProduct = new Product();
-            newProduct.setSku(sku);
-            newProduct.setName(name);
-            newProduct.setStockQuantity(stockQuantity);
-            newProduct.setVendor(vendor);
-            productRepository.save(newProduct);
-
-            if (stockQuantity == 0) {
-                log.warn("New product {} ({}) is OUT OF STOCK!", sku, vendor);
-                StockEvent event = new StockEvent(sku, vendor, LocalDateTime.now());
-                stockEventRepository.save(event);
-            }
+        if (!isNewProduct) {
+            product.setName(productDTO.name());
+            product.setStockQuantity(productDTO.stockQuantity());
         }
+
+        if ((!isNewProduct && oldStockQuantity != null && oldStockQuantity > 0 && productDTO.stockQuantity() == 0) ||
+                (isNewProduct && productDTO.stockQuantity() == 0)) {
+            log.warn("Product {} ({}) is now OUT OF STOCK!", productDTO.sku(), productDTO.vendor());
+            StockEvent event = new StockEvent(productDTO.sku(), productDTO.vendor(), LocalDateTime.now());
+            stockEventRepository.save(event);
+        }
+
+        productRepository.save(product);
     }
 }

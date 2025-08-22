@@ -1,20 +1,26 @@
 package com.example.stocksync.service;
 import com.example.stocksync.dto.VendorAProductDTO;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 @Service
 public class VendorAClient {
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
+    private final String vendorAUrl;
 
-    private static final String VENDOR_A_URL = "http://localhost:8080/mock/vendor-a";
+    public VendorAClient(RestTemplate restTemplate,
+                         @Value("${vendor.a.url}") String vendorAUrl) {
+        this.restTemplate = restTemplate;
+        this.vendorAUrl = vendorAUrl;
+    }
 
     public List<VendorAProductDTO> fetchProducts() {
-        VendorAProductDTO[] response = restTemplate.getForObject(VENDOR_A_URL, VendorAProductDTO[].class);
-        return response != null ? Arrays.asList(response) : List.of();
+        return Arrays.asList(Objects.requireNonNull(restTemplate.getForObject(vendorAUrl, VendorAProductDTO[].class)));
     }
 }
