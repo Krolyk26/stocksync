@@ -1,28 +1,44 @@
-version: '3.8'
+version: '3.9'
 
 services:
-  app:
-    build: .
-    ports:
-      - "8080:8080"
-    environment:
-      - SPRING_DATASOURCE_URL=jdbc:mysql://db:3306/stocksyncdb
-      - SPRING_DATASOURCE_USERNAME=user
-      - SPRING_DATASOURCE_PASSWORD=password
-    depends_on:
-      - db
-
   db:
     image: mysql:8.0
+    container_name: stocksync-mysql
+    environment:
+      MYSQL_DATABASE: stocksyncdb
+      MYSQL_USER: app
+      MYSQL_PASSWORD: apppass
+      MYSQL_ROOT_PASSWORD: rootpass
     ports:
       - "3306:3306"
-    environment:
-      - MYSQL_DATABASE=stocksyncdb
-      - MYSQL_USER=user
-      - MYSQL_PASSWORD=password
-      - MYSQL_ROOT_PASSWORD=rootpassword
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     volumes:
       - db_data:/var/lib/mysql
+
+  app:
+    build: .
+    container_name: stocksync-app
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./src/main/resources/vendor-b:/app/resources/vendor-b:ro
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/stocksyncdb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8
+      SPRING_DATASOURCE_USERNAME: app
+      SPRING_DATASOURCE_PASSWORD: apppass
+      VENDOR_B_CSV: file:/app/resources/vendor-b/stock.csv
+    ports:
+      - "8080:8080"
 
 volumes:
   db_data:

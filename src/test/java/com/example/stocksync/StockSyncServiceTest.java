@@ -1,14 +1,14 @@
 package com.example.stocksync;
 
-import com.example.stocksync.dto.ProductDTO;
-import com.example.stocksync.dto.VendorAProductDTO;
-import com.example.stocksync.dto.VendorBProductDTO;
-import com.example.stocksync.entity.Product;
-import com.example.stocksync.repository.ProductRepository;
-import com.example.stocksync.repository.StockEventRepository;
+import com.example.stocksync.entity.product.dto.ProductCreateRequest;
+import com.example.stocksync.entity.product.dto.ProductResponse;
+import com.example.stocksync.entity.product.dto.ProductUpdateRequest;
+import com.example.stocksync.entity.stockEvent.dto.StockEventCreateRequest;
 import com.example.stocksync.service.StockSyncService;
-import com.example.stocksync.service.VendorAClient;
-import com.example.stocksync.service.VendorBClient;
+import com.example.stocksync.service.productService.ProductService;
+import com.example.stocksync.service.stockEventService.StockEventService;
+import com.example.stocksync.service.vendor.VendorAClient;
+import com.example.stocksync.service.vendor.VendorBClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,99 +16,71 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class StockSyncServiceTest {
 
-    @Mock
-    private ProductRepository productRepository;
+    @Mock private ProductService productService;
+    @Mock private StockEventService stockEventService;
+    @Mock private VendorAClient vendorAClient;
+    @Mock private VendorBClient vendorBClient;
 
-    @Mock
-    private StockEventRepository stockEventRepository;
+    @InjectMocks private StockSyncService stockSyncService;
 
-    @Mock
-    private VendorAClient vendorAClient;
-
-    @Mock
-    private VendorBClient vendorBClient;
-
-    @InjectMocks
-    private StockSyncService stockSyncService;
-
-    private Product existingProduct;
+    private ProductResponse existingInStock;
 
     @BeforeEach
     void setUp() {
-        existingProduct = new Product("SKU1", "Existing Product", 10, "VendorA");
-        existingProduct.setId(1L);
+        existingInStock = new ProductResponse(1L, "SKU1", "Existing", 5, "Vendor A", null, null);
     }
 
     @Test
-    void syncStock_shouldFetchAndProcessAllVendorProducts() {
-        List<VendorAProductDTO> vendorAProducts = Arrays.asList(
-                new VendorAProductDTO("A-1", "Product from A", 50, "VendorA"),
-                new VendorAProductDTO("A-2", "Product from A out", 0, "VendorA")
+    void syncStock_createsNew_updatesExisting_and_emitsOutOfStock() {
+        List<ProductCreateRequest> a = List.of(
+                new ProductCreateRequest("SKU1", "Existing", 0, "Vendor A"),
+                new ProductCreateRequest("A-2", "New A", 3, "Vendor A")
         );
-
-        List<VendorBProductDTO> vendorBProducts = Arrays.asList(
-                new VendorBProductDTO("B-1", "Product from B", 25, "VendorB")
+        List<ProductCreateRequest> b = List.of(
+                new ProductCreateRequest("B-1", "New B", 2, "Vendor B")
         );
+        when(vendorAClient.fetchProducts()).thenReturn(a);
+        when(vendorBClient.fetchProducts()).thenReturn(b);
 
-        when(vendorAClient.fetchProducts()).thenReturn(vendorAProducts);
-        when(vendorBClient.fetchProducts()).thenReturn(vendorBProducts);
+        when(productService.findBySkuAndVendor("SKU1", "Vendor A")).thenReturn(Optional.of(existingInStock));
+        when(productService.findBySkuAndVendor("A-2", "Vendor A")).thenReturn(Optional.empty());
+        when(productService.findBySkuAndVendor("B-1", "Vendor B")).thenReturn(Optional.empty());
 
-        when(productRepository.findBySkuAndVendor(anyString(), anyString()))
-                .thenReturn(Optional.empty());
+        when(productService.updateProduct(eq(1L), any(ProductUpdateRequest.class)))
+                .thenReturn(new ProductResponse(1L, "SKU1", "Existing", 0, "Vendor A", null, null));
 
         stockSyncService.syncStock();
 
-        verify(vendorAClient, times(1)).fetchProducts();
-        verify(vendorBClient, times(1)).fetchProducts();
-
-        verify(productRepository, times(3)).save(any(Product.class));
-
-        verify(stockEventRepository, times(1)).save(any());
+        verify(productService, times(3)).findBySkuAndVendor(anyString(), anyString());
+        verify(productService, times(2)).createProduct(any(ProductCreateRequest.class));
+        verify(productService, times(1)).updateProduct(eq(1L), any(ProductUpdateRequest.class));
+        verify(stockEventService, times(1)).createStockEvent(any(StockEventCreateRequest.class));
     }
 
     @Test
-    void upsertProduct_shouldUpdateExistingProduct_whenFound() {
-        ProductDTO productDTO = new ProductDTO("SKU1", "Updated Product", 5, "VendorA");
-        when(productRepository.findBySkuAndVendor("SKU1", "VendorA"))
-                .thenReturn(Optional.of(existingProduct));
+    void syncStock_emitsInStock_whenTransitionFromZeroToPositive() {
+        List<ProductCreateRequest> a = List.of(
+                new ProductCreateRequest("SKU1", "Existing", 5, "Vendor A")
+        );
+        when(vendorAClient.fetchProducts()).thenReturn(a);
+        when(vendorBClient.fetchProducts()).thenReturn(List.of());
 
-        stockSyncService.upsertProduct(productDTO);
+        ProductResponse existingOut = new ProductResponse(2L, "SKU1", "Existing", 0, "Vendor A", null, null);
+        when(productService.findBySkuAndVendor("SKU1", "Vendor A")).thenReturn(Optional.of(existingOut));
+        when(productService.updateProduct(eq(2L), any(ProductUpdateRequest.class)))
+                .thenReturn(new ProductResponse(2L, "SKU1", "Existing", 5, "Vendor A", null, null));
 
-        verify(productRepository, times(1)).save(any(Product.class));
-        assertEquals("Updated Product", existingProduct.getName());
-        assertEquals(5, existingProduct.getStockQuantity());
-    }
+        stockSyncService.syncStock();
 
-    @Test
-    void upsertProduct_shouldCreateNewProduct_whenNotFound() {
-        ProductDTO productDTO = new ProductDTO("SKU2", "New Product", 20, "VendorB");
-        when(productRepository.findBySkuAndVendor("SKU2", "VendorB"))
-                .thenReturn(Optional.empty());
-
-        stockSyncService.upsertProduct(productDTO);
-
-        verify(productRepository, times(1)).save(any(Product.class));
-        verify(stockEventRepository, never()).save(any());
-    }
-
-    @Test
-    void upsertProduct_shouldLogStockEvent_whenGoesOutOfStock() {
-        ProductDTO productDTO = new ProductDTO("SKU1", "Existing Product", 0, "VendorA");
-        when(productRepository.findBySkuAndVendor("SKU1", "VendorA"))
-                .thenReturn(Optional.of(existingProduct));
-        stockSyncService.upsertProduct(productDTO);
-        verify(stockEventRepository, times(1)).save(any());
+        verify(stockEventService, times(1)).createStockEvent(any(StockEventCreateRequest.class));
     }
 }

@@ -1,3 +1,6 @@
 sku,name,stockQuantity
 ABC123,Product A,10
-XYZ456,Product B,0
+XYZ456,Product B,10
+LMN789,Product C,2
+DEF222,Product D,0
+QWE555,Product E,15

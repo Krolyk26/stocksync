@@ -1,13 +1,25 @@
 package com.example.stocksync.config;
+import org.springframework.boot.http.client.ClientHttpRequestFactorySettings;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.retry.annotation.EnableRetry;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.Duration;
+
 @Configuration
+@EnableRetry
 public class AppConfig {
 
     @Bean
-    public RestTemplate restTemplate() {
-        return new RestTemplate();
+    public RestTemplate restTemplate(RestTemplateBuilder builder) {
+        ClientHttpRequestFactorySettings settings = ClientHttpRequestFactorySettings.defaults()
+                .withConnectTimeout(Duration.ofSeconds(2))
+                .withReadTimeout(Duration.ofSeconds(3));
+
+        return builder
+                .requestFactorySettings(settings)
+                .build();
     }
 }
